@@ -5,25 +5,46 @@ import crtk_comm
 
 
 class crtk_robot:
-	def __init__(self, node, namespaces):
 
-		self.ral = []
-		self.arm = []
+	class Arm:
+		def __init__(self, ral):
+			# Create required rostopics for an arm
+			self.crtk = crtk.utils(self, ral)
+			self.crtk.add_operating_state()
+			self.crtk.add_setpoint_cp()
+			self.crtk.add_measured_cp()
+			self.crtk.add_servo_cp()
+
+	class Gripper:
+		def __init__(self, ral):
+			# Create required rostopics for a grasper
+			self.crtk = crtk.utils(self, ral)
+			self.crtk.add_setpoint_js()
+			self.crtk.add_measured_js()
+			self.crtk.add_servo_jr()
+
+	def __init__(self, node, arm_namespaces, gripper_namespaces):
+
+		self.ral = crtk.ral(node)
+		self.arms = []
+		self.grippers = []
 		self.target_cp = []
-		self.type = node
+		self.type = self.ral.node_name()
 
-		# Create rals for listed arms
-		for i in range(len(namespaces)):
-			self.ral.append(crtk.ral(node, namespaces[i]))
+		self.rate = 1000
+		self.sleep_rate = self.ral.create_rate(self.rate)
 
 		# Initialize CRTK for listed arms
-		for j in range(len(self.ral)):
-			self.arm.append(crtk_comm.crtk_comm(self.ral[j]))
+		for arm in arm_namespaces:
+			self.arms.append(self.Arm(self.ral.create_child(arm)))
+
+		# Initialize CRTK for listed grippers
+		for gripper in gripper_namespaces:
+			self.grippers.append(self.Gripper(self.ral.create_child(gripper)))
 
 		# Check connections and spin
-		for k in range(len(self.ral)):
-			self.ral[k].check_connections()
-			self.ral[k].spin()
+		self.ral.check_connections()
+		self.ral.spin()
 
 		# Set initial target Cartesian Points
 		self.reset_target_cp()
@@ -40,8 +61,8 @@ class crtk_robot:
 
 	def reset_target_cp(self):
 		self.target_cp = []
-		for i in range(len(self.arm)):
-			self.target_cp.append(self.arm[i].measured_cp())
+		for i in range(len(self.arms)):
+			self.target_cp.append(self.arms[i].measured_cp())
 
 	def get_type(self):
 		return self.type

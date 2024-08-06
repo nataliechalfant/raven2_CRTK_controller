@@ -1,5 +1,6 @@
 import time
 import PyKDL
+import numpy
 import xbox_inputs
 import crtk_robot
 import raven2_defs
@@ -7,6 +8,7 @@ import raven2_defs
 # Safety limits
 max_pos = raven2_defs.max_pos
 max_rot = raven2_defs.max_rot
+max_grip = raven2_defs.max_grip
 
 # Controller mode
 # 0: two arm mode
@@ -15,7 +17,7 @@ mode = 1
 max_arms = 2
 
 # Timing
-last_loop = time.time()
+start_time = time.time()
 last_second = time.time()
 loops_per_second = 1
 
@@ -23,13 +25,13 @@ loops_per_second = 1
 def generate_one_arm_cr(xbc):
 	global max_pos, max_rot
 	# generate pos_cr
-	x_pos = xbc.get_lj_y() * max_pos * (-1)
+	x_pos = xbc.get_lj_y() * max_pos
 	y_pos = xbc.get_lj_x() * max_pos
 	z_pos = (xbc.get_lt() - xbc.get_rt()) * max_pos
 	pos = PyKDL.Vector(x_pos, y_pos, z_pos)
 	# generate rot_cr
-	x_rot = xbc.get_rj_y() * -max_rot
-	y_rot = xbc.get_rj_x() * max_rot
+	x_rot = xbc.get_rj_x() * -max_rot
+	y_rot = xbc.get_rj_y() * max_rot
 	z_rot = (xbc.get_lb() - xbc.get_rb()) * max_rot
 	rot = PyKDL.Rotation.RPY(x_rot, y_rot, z_rot)
 
@@ -39,7 +41,7 @@ def generate_one_arm_cr(xbc):
 def generate_two_arm_cr(xbc):
 	global max_pos, max_rot
 	# generate arm1_cr
-	x_pos1 = xbc.get_lj_y() * max_pos * (-1)
+	x_pos1 = xbc.get_lj_y() * max_pos
 	y_pos1 = xbc.get_lj_x() * max_pos
 	if xbc.get_lb():
 		lz_mod = 1
@@ -48,7 +50,7 @@ def generate_two_arm_cr(xbc):
 	z_pos1 = (xbc.get_lt() * lz_mod) * max_pos
 	pos1 = PyKDL.Vector(x_pos1, y_pos1, z_pos1)
 	# generate arm2_cr
-	x_pos2 = xbc.get_rj_y() * max_pos * (-1)
+	x_pos2 = xbc.get_rj_y() * max_pos
 	y_pos2 = xbc.get_rj_x() * max_pos
 	if xbc.get_rb():
 		rz_mod = 1
@@ -58,6 +60,38 @@ def generate_two_arm_cr(xbc):
 	pos2 = PyKDL.Vector(x_pos2, y_pos2, z_pos2)
 
 	return [PyKDL.Frame(PyKDL.Rotation(), pos1), PyKDL.Frame(PyKDL.Rotation(), pos2)]
+
+
+def generate_one_arm_gripper(xbc):
+	global max_grip
+	if xbc.get_a():
+		grip = [max_grip]
+	elif xbc.get_b():
+		grip = [-max_grip]
+	else:
+		grip = [0]
+
+	return numpy.array(grip, dtype=float)
+
+
+def generate_two_arm_gripper(xbc):
+	global max_grip
+	# generate grip1
+	if xbc.get_a():
+		grip1 = [max_grip, 0, 0]
+	elif xbc.get_b():
+		grip1 = [-max_grip, 0, 0]
+	else:
+		grip1 = [0, 0, 0]
+	# generate grip2
+	if xbc.get_x():
+		grip2 = [max_grip, 0, 0]
+	elif xbc.get_y():
+		grip2 = [-max_grip, 0, 0]
+	else:
+		grip2 = [0, 0, 0]
+
+	return [numpy.array(grip1, dtype=float), numpy.array(grip2, dtype=float)]
 
 
 def update_mode(xbc):
@@ -77,10 +111,9 @@ def update_mode(xbc):
 
 
 def check_loop_time():
-	global last_loop
-	if (time.time() - last_loop) < 0.001:
-		time.sleep(0.001 - (time.time() - last_loop))
-		last_loop = time.time()
+	global start_time
+	time.sleep(max(start_time - time.time(), 0))
+	start_time += 0.001
 
 
 def show_loop_freq():
@@ -94,7 +127,8 @@ def show_loop_freq():
 
 
 def main_control(robots, xbc):
-	global mode
+	global mode, start_time
+	start_time = time.time()
 
 	while True:
 		update_mode(xbc)
@@ -105,21 +139,26 @@ def main_control(robots, xbc):
 				try:
 					for i in range(2):
 						robot.update_target_cp(i, pos[i])
-						robot.arm[i].servo_cp(robot.get_target_cp(i))
+						robot.arms[i].servo_cp(robot.get_target_cp(i))
+						robot.grippers[i].servo_jr(generate_two_arm_gripper(xbc)[i])
+						print(robot.grippers[i].setpoint_js())
 				except IndexError:
 					print(robot.get_type(), " does not have two arms")
 		# One arm mode
 		else:
 			pos = generate_one_arm_cr(xbc)
+			# print(generate_one_arm_gripper(xbc))
 			for robot in robots:
 				try:
 					robot.update_target_cp(mode - 1, pos)
-					robot.arm[mode - 1].servo_cp(robot.get_target_cp(mode - 1))
+					robot.arms[mode - 1].servo_cp(robot.get_target_cp(mode - 1))
+					robot.grippers[mode - 1].servo_jr(generate_one_arm_gripper(xbc))
+					# print(robot.grippers[mode - 1].measured_js())
+
 				except IndexError:
 					print(robot.get_type(), " does not have the selected arm")
 
-		# check_loop_time()
-		time.sleep(0.001)
+		check_loop_time()
 		show_loop_freq()
 
 
@@ -132,7 +171,7 @@ def main():
 		exit()
 
 	# Initialize physical raven2
-	r2p = crtk_robot.crtk_robot(raven2_defs.node, raven2_defs.namespaces)
+	r2p = crtk_robot.crtk_robot(raven2_defs.node, raven2_defs.arm_namespaces, raven2_defs.gripper_namespaces)
 	robots = [r2p]
 
 	try:

@@ -62,6 +62,8 @@ class xbox_inputs(object):
         self.UpDPad = 0
         self.DownDPad = 0
 
+        self.deadzone = 0.1
+
         self.Back_returned = False
         self.Start_returned = False
 
@@ -70,16 +72,28 @@ class xbox_inputs(object):
         self._monitor_thread.start()
 
     def get_lj_x(self):
-        return self.LeftJoystickX
+        if self.check_deadzone_lj():
+            return self.LeftJoystickX * (-1)
+        else:
+            return 0
 
     def get_lj_y(self):
-        return self.LeftJoystickY
+        if self.check_deadzone_lj():
+            return self.LeftJoystickY * (-1)
+        else:
+            return 0
 
     def get_rj_x(self):
-        return self.RightJoystickX
+        if self.check_deadzone_rj():
+            return self.RightJoystickX * (-1)
+        else:
+            return 0
 
     def get_rj_y(self):
-        return self.RightJoystickY
+        if self.check_deadzone_rj():
+            return self.RightJoystickY * (-1)
+        else:
+            return 0
 
     def get_lt(self):
         return self.LeftTrigger
@@ -117,18 +131,29 @@ class xbox_inputs(object):
             self.Start_returned = False
             return 0
 
-    def read(self): # return the buttons/triggers that you care about in this methode
-        lx = self.LeftJoystickX
-        ly = self.LeftJoystickY
-        lt = self.LeftTrigger
-        lb = self.LeftBumper
+    def get_a(self):
+        return self.A
 
-        rx = self.RightJoystickX
-        ry = self.RightJoystickY
-        rt = self.RightTrigger
-        rb = self.RightBumper
-        return [[lx, ly, lt, lb], [rx, ry, rt, rb],
-                [self.A, self.B, self.X, self.Y, self.Back, self.Start]]
+    def get_b(self):
+        return self.B
+
+    def get_x(self):
+        return self.X
+
+    def get_y(self):
+        return self.Y
+
+    def check_deadzone_lj(self):
+        if math.sqrt(self.LeftJoystickX**2 + self.LeftJoystickY**2) > self.deadzone:
+            return True
+        else:
+            return False
+
+    def check_deadzone_rj(self):
+        if math.sqrt(self.RightJoystickX**2 + self.RightJoystickY**2) > self.deadzone:
+            return True
+        else:
+            return False
 
     def rumble(self, left, right, time):
         try:
